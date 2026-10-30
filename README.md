@@ -6,33 +6,47 @@ It lives in its own repo because CrewAI requires Python < 3.14, while ai-experim
 
 ## Requirements
 
-- [uv](https://docs.astral.sh/uv/) and Python 3.13 (the project venv is `crew-ai-py3.13/`)
+- [uv](https://docs.astral.sh/uv/) (it installs Python 3.13 into `.venv` by itself)
 - [Ollama](https://ollama.com) running on `localhost:11434` with `gemma4:12b-mlx`, `nemotron-3.5-bolt:e4b`, `bonsai-2:4b` and `qwen3.5:4b-mlx`
 
 ```bash
-export UV_PROJECT_ENVIRONMENT=crew-ai-py3.13
 uv sync
-uv run deep_search_multi_crewai.py "What is Log4Shell and what mitigations does CISA recommend?"
+uv run deep-cyber-researcher "What is Log4Shell and what mitigations does CISA recommend?"
 ```
 
-`--max-analyst-calls N` caps each analyst's model calls (default 12).
+Add `--dashboard` to follow the run live in the telemetry dashboard at http://localhost:8766 (`--dashboard-port` to change it). With a question on the command line, the dashboard stays up after the answer until Ctrl+C.
+
+Without a question it starts an interactive prompt. `--max-analyst-calls N` caps each analyst's model calls (default 12). `uv run python -m crew_ai_experiment` works too.
+
+## Development
+
+```bash
+uv run pytest          # offline smoke tests: no Ollama or network needed
+uv run ruff check .
+uv run ruff format .
+```
 
 ## Files
+
+All under `src/crew_ai_experiment/`:
 
 | File | What it does |
 |------|--------------|
 | `deep_search_multi_crewai.py` | Master + 3 analysts; each analyst is a CrewAI `Agent` exposed to the master as a delegation tool taking a `brief`, and the three run in parallel |
 | `research_tools.py` | Copy of ai-experiment's shared tools (DuckDuckGo search on trusted sites, HTML/PDF page fetcher, prompts): keep the two copies identical |
 | `telemetry_crewai.py` | observra telemetry from CrewAI's event bus, same events and fields as the other frameworks |
+| `dashboard.py`, `dashboard.html` | Copy of ai-experiment's telemetry dashboard (standard library only): keep the copies identical |
+| `__main__.py` | `python -m crew_ai_experiment` entry point |
 
 ## Telemetry
 
-Events go to `telemetry.db` (SQLite). Open them with ai-experiment's dashboard, on a second port to keep both open:
+Events go to `telemetry.db` (SQLite) in the current directory. Besides `--dashboard` during a run, the dashboard can be opened on its own to browse past runs:
 
 ```bash
-cd ../ai-experiment
-uv run dashboard.py --db /opt/crew-ai-experiment/telemetry.db --port 8766
+uv run deep-cyber-dashboard --port 8766   # [--db telemetry.db]
 ```
+
+Port 8766 keeps it clear of ai-experiment's dashboard (8765), so both can stay open.
 
 CrewAI's own anonymous telemetry is turned off in the script (`OTEL_SDK_DISABLED`, `CREWAI_TRACING_ENABLED`): nothing leaves the machine.
 

@@ -22,8 +22,11 @@ anonymous telemetry is turned off (everything here stays local).
 
 import argparse
 import os
+import threading
 import time
 import warnings
+from http.server import ThreadingHTTPServer
+
 warnings.filterwarnings("ignore", message="Core Pydantic V1 functionality")
 
 # CrewAI sends anonymous usage telemetry by default: off before importing it
@@ -38,8 +41,9 @@ from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUs
 from crewai.hooks.llm_hooks import register_before_llm_call_hook
 from crewai.tools import tool
 
-from telemetry_crewai import register_handlers, telemetry_session
-from research_tools import search_sites, make_fetch_page, ANALYST_PROMPT, SITES
+from . import dashboard
+from .research_tools import ANALYST_PROMPT, SITES, make_fetch_page, search_sites
+from .telemetry_crewai import register_handlers, telemetry_session
 
 MASTER_MODEL = "gemma4:12b-mlx"
 MASTER_NAME = "research_coordinator"
@@ -60,7 +64,9 @@ LLM_TIMEOUT = 420
 # analyst uses 3-6; the cap stops a model stuck repeating the same tool call
 # (granite4.2:3b fetched one page 146 times in 45 minutes)
 MAX_ANALYST_CALLS = 12
-TELEMETRY_DB = "telemetry.db"  # read by ai-experiment's dashboard.py --db
+TELEMETRY_DB = "telemetry.db"  # read by dashboard.py
+# --dashboard port: ai-experiment's own dashboard defaults to 8765, so both can stay open
+DASHBOARD_PORT = 8766
 
 
 def declare_tool_calling(model_names: list[str]):
@@ -72,14 +78,16 @@ def declare_tool_calling(model_names: list[str]):
     and it kept writing invented steps until the 3000-token cap (3-5 min per
     call). Ollama does parse their tool calls: the other frameworks use them.
     """
-    litellm.register_model({
-        f"ollama_chat/{name}": {
-            "litellm_provider": "ollama_chat",
-            "mode": "chat",
-            "supports_function_calling": True,
+    litellm.register_model(
+        {
+            f"ollama_chat/{name}": {
+                "litellm_provider": "ollama_chat",
+                "mode": "chat",
+                "supports_function_calling": True,
+            }
+            for name in model_names
         }
-        for name in model_names
-    })
+    )
 
 
 def make_llm(name: str, num_retries: int = 0) -> LLM:
@@ -232,10 +240,27 @@ def build_master(max_calls: int) -> Agent:
         backstory=master_prompt([a.role for a in analysts]),
         llm=make_llm(MASTER_MODEL),
         # no research tools: delegation only
-        tools=[analyst_tool(a, model) for a, model in zip(analysts, ANALYST_MODELS)],
+        tools=[analyst_tool(a, model) for a, model in zip(analysts, ANALYST_MODELS, strict=True)],
         allow_delegation=False,  # CrewAI's own coworker delegation: not used
         verbose=False,
     )
+
+
+def start_dashboard(port: int) -> ThreadingHTTPServer | None:
+    """Serve the telemetry dashboard in the background, to follow the runs live.
+
+    observra writes its events in batches every 0.5 s, and the page refreshes
+    itself, so the current run shows up while it is going.
+    """
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), dashboard.make_handler(TELEMETRY_DB))
+    except OSError as e:
+        # e.g. the port is taken: the research runs anyway
+        print(f"Dashboard not started on port {port}: {e}", flush=True)
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"Dashboard on http://localhost:{server.server_port}  (db: {TELEMETRY_DB})", flush=True)
+    return server
 
 
 def run(question: str, master: Agent):
@@ -260,14 +285,23 @@ def run(question: str, master: Agent):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Multi-agent cybersecurity deep search (CrewAI)"
-    )
+    parser = argparse.ArgumentParser(description="Multi-agent cybersecurity deep search (CrewAI)")
     parser.add_argument(
         "--max-analyst-calls",
         type=int,
         default=MAX_ANALYST_CALLS,
         help=f"cap on each analyst's model calls (default {MAX_ANALYST_CALLS})",
+    )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="also serve the telemetry dashboard, to follow the run live",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=DASHBOARD_PORT,
+        help=f"port of the --dashboard (default {DASHBOARD_PORT})",
     )
     parser.add_argument("question", nargs="*", help="The research question")
     args = parser.parse_args()
@@ -278,9 +312,17 @@ def main():
     show_progress()
     declare_tool_calling([MASTER_MODEL, *ANALYST_MODELS])
     master = build_master(args.max_analyst_calls)
+    server = start_dashboard(args.dashboard_port) if args.dashboard else None
 
     if args.question:
         run(" ".join(args.question), master)
+        if server:
+            # keep the dashboard up to look at the finished run
+            print("Dashboard still running — Ctrl+C to stop")
+            try:
+                threading.Event().wait()
+            except KeyboardInterrupt:
+                pass
         return
 
     print(f"Multi-agent deep search (CrewAI) — master: {MASTER_MODEL}")

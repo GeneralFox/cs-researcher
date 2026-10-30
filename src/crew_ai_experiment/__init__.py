@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from crew-ai-experiment!")
+"""CrewAI port of ai-experiment's multi-agent cybersecurity deep search."""

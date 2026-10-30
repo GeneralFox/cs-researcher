@@ -9,8 +9,5 @@ wheels/
 # Virtual environments
 .venv
 
-# project venv (Python 3.13: CrewAI does not support 3.14)
-crew-ai-py3.13/
-
 # observra telemetry
 telemetry.db*

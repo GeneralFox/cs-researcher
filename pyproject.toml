@@ -1,11 +1,12 @@
 [project]
 name = "crew-ai-experiment"
 version = "0.1.0"
-description = "Add your description here"
+description = "CrewAI port of the multi-agent cybersecurity deep search: a master model orchestrating three analysts on local Ollama models"
 readme = "README.md"
 authors = [
     { name = "irongian", email = "me@gllabs.eu" }
 ]
+# CrewAI does not support Python 3.14 yet
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "beautifulsoup4>=4.15.0",
@@ -17,8 +18,30 @@ dependencies = [
 ]
 
 [project.scripts]
-crew-ai-experiment = "crew_ai_experiment:main"
+deep-cyber-researcher = "crew_ai_experiment.deep_search_multi_crewai:main"
+deep-cyber-dashboard = "crew_ai_experiment.dashboard:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.9",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+# verbatim copy of ai-experiment's dashboard: keep it diffable against the original
+exclude = ["src/crew_ai_experiment/dashboard.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# the env vars that turn CrewAI's telemetry off must be set before importing it
+per-file-ignores = { "src/crew_ai_experiment/deep_search_multi_crewai.py" = ["E402"] }

@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Telemetry</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #677085;
+    --border: #e2e5eb; --accent: #3b6fe0; --accent2: #12a38a; --err: #d04a3c;
+    --adk: #e8f0fe; --adk-text: #1a56c9; --lg: #e6f6f2; --lg-text: #0d7d69;
+    --row-hover: #f0f3f8; --row-sel: #e3ebfb;
+    /* swimlane: categorical slots 1-2 + status critical (dataviz palette) */
+    --viz-llm: #2a78d6; --viz-tool: #eb6834; --viz-critical: #d03b3b;
+    --viz-track: #f0f2f5; --viz-grid: #e6e8ec;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #8f98ab;
+      --border: #2b313c; --accent: #6d9bff; --accent2: #3cc9ad; --err: #f07a6c;
+      --adk: #1e2c47; --adk-text: #9dbcff; --lg: #173832; --lg-text: #6fe0c7;
+      --row-hover: #222833; --row-sel: #24324d;
+      --viz-llm: #3987e5; --viz-tool: #d95926;
+      --viz-track: #232833; --viz-grid: #2b313c;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .status { color: var(--muted); font-size: 12px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .grid { display: grid; gap: 16px; margin-top: 16px; }
+  .two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .kpi .label { color: var(--muted); font-size: 12px; }
+  .kpi .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi.err .value { color: var(--err); }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  #sessions tbody tr { cursor: pointer; }
+  #sessions tbody tr:hover { background: var(--row-hover); }
+  #sessions tbody tr.sel { background: var(--row-sel); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .badge.adk { background: var(--adk); color: var(--adk-text); }
+  .badge.langgraph { background: var(--lg); color: var(--lg-text); }
+  .bar-row { display: grid; grid-template-columns: minmax(120px, 34%) 1fr auto; gap: 10px; align-items: center; margin: 8px 0; }
+  .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-label small { color: var(--muted); display: block; font-size: 11px; }
+  .bar { height: 14px; background: var(--border); border-radius: 4px; overflow: hidden; display: flex; }
+  .bar .in { background: var(--accent); }
+  .bar .out { background: var(--accent2); }
+  .bar-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  #timeline { max-height: 420px; overflow: auto; }
+  #timeline td { font-size: 12px; }
+  #timeline td.detail { white-space: normal; min-width: 260px; }
+  .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .panel-head label { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .agent { font-weight: 500; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 999px; cursor: pointer;
+          border: 1px solid var(--border); background: var(--row-sel); color: var(--text); }
+  .chip.off { background: transparent; color: var(--muted); text-decoration: line-through; }
+  .chip .n { color: var(--muted); margin-left: 4px; }
+  .ev-error { color: var(--err); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 12px 0; }
+  /* swimlane */
+  .viz-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--muted); }
+  .viz-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .viz-legend svg { display: block; }
+  .viz-note { font-size: 12px; color: var(--muted); margin: 0; }
+  #swimlane { position: relative; }
+  #swimlane svg { display: block; width: 100%; overflow: visible; }
+  #swimlane .hit { fill: transparent; cursor: default; outline: none; }
+  #swimlane .hit:focus-visible + .mark, #swimlane .hit:hover + .mark { filter: brightness(1.15); }
+  .viz-tip { position: absolute; pointer-events: none; z-index: 2; min-width: 160px; max-width: 320px;
+             background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+             box-shadow: 0 4px 14px rgba(0,0,0,.12); padding: 8px 10px; font-size: 12px; }
+  .viz-tip .v { font-weight: 600; font-size: 13px; color: var(--text); }
+  .viz-tip .k { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 6px; }
+  .viz-tip .l { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Agent Telemetry <span class="muted" style="font-weight:400">· observra / SQLite</span></h1>
+    <span class="status" id="status">loading…</span>
+  </header>
+
+  <section class="kpis grid" id="kpis"></section>
+
+  <section class="panel grid">
+    <h2>Sessions</h2>
+    <div class="scroll">
+      <table id="sessions">
+        <thead><tr>
+          <th>Framework</th><th>Started</th><th class="num">Duration</th><th class="num">Models</th>
+          <th class="num">LLM calls</th><th class="num">Tokens in</th><th class="num">Tokens out</th>
+          <th class="num">Tool calls</th><th class="num">Errors</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel grid">
+    <h2>Agent swimlane</h2>
+    <div class="viz-legend" aria-label="Legend">
+      <span class="key"><svg width="16" height="10"><rect width="16" height="10" rx="3" fill="var(--viz-track)"/></svg>agent active</span>
+      <span class="key"><svg width="16" height="10"><rect y="2" width="16" height="6" rx="2" fill="var(--viz-llm)"/></svg>LLM call</span>
+      <span class="key"><svg width="16" height="10"><rect y="2" width="16" height="6" rx="2" fill="var(--viz-tool)"/></svg>tool call</span>
+      <span class="key"><svg width="16" height="10"><line x1="0" y1="5" x2="16" y2="5" stroke="var(--muted)" stroke-width="1"/></svg>delegation / report back</span>
+      <span class="key"><svg width="12" height="12"><circle cx="6" cy="6" r="6" fill="var(--viz-critical)"/><text x="6" y="9" text-anchor="middle" font-size="9" fill="#fff">✕</text></svg>error</span>
+    </div>
+    <div id="swimlane"></div>
+    <p class="viz-note">Every segment is also listed in the event timeline below.</p>
+  </section>
+
+  <section class="grid two">
+    <div class="panel">
+      <h2>Tokens by agent / model</h2>
+      <div class="legend"><span><i style="background:var(--accent)"></i>input</span><span><i style="background:var(--accent2)"></i>output</span></div>
+      <div id="models"></div>
+    </div>
+    <div class="panel">
+      <h2>Tool calls</h2>
+      <div class="scroll"><table id="tools">
+        <thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Avg</th><th class="num">Max</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="panel grid">
+    <div class="panel-head">
+      <h2>Event timeline</h2>
+      <label><input type="checkbox" id="show-all"> show all events</label>
+    </div>
+    <div class="chips" id="type-filter"></div>
+    <div id="timeline"><table>
+      <thead><tr><th>+time</th><th>Agent</th><th>Event</th><th>Detail</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section class="panel grid">
+    <h2>Errors</h2>
+    <div id="errors"></div>
+  </section>
+</main>
+
+<script>
+const REFRESH_MS = 5000;
+let selected = null;
+
+const $ = (sel) => document.querySelector(sel);
+const fmtInt = (n) => (n ?? 0).toLocaleString();
+const shortModel = (m) => (m || "").replace(/^ollama_chat\//, "");
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function fmtDur(sec) {
+  if (sec == null) return "–";
+  const m = Math.floor(sec / 60), s = sec - m * 60;
+  return m ? `${m}m ${s.toFixed(0).padStart(2, "0")}s` : `${s.toFixed(1)}s`;
+}
+const fmtMs = (ms) => (ms == null ? "–" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed(0)}ms`);
+const fmtTime = (ts) => new Date(ts * 1000).toLocaleString();
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+function renderKpis(s) {
+  const tiles = s ? [
+    ["Duration", fmtDur(s.end - s.start)],
+    ["LLM calls", fmtInt(s.model_calls)],
+    ["Tokens in", fmtInt(s.input_tokens)],
+    ["Tokens out", fmtInt(s.output_tokens)],
+    ["Tool calls", fmtInt(s.tool_calls)],
+    ["Errors", fmtInt(s.errors), s.errors > 0],
+  ] : [];
+  $("#kpis").innerHTML = tiles.map(([label, value, bad]) =>
+    `<div class="kpi${bad ? " err" : ""}"><div class="label">${label}</div><div class="value">${value}</div></div>`).join("");
+}
+
+function renderSessions(list) {
+  $("#sessions tbody").innerHTML = list.map((s) => `
+    <tr data-id="${esc(s.session_id)}" class="${s.session_id === selected ? "sel" : ""}">
+      <td><span class="badge ${esc(s.framework)}">${esc(s.framework)}</span></td>
+      <td>${fmtTime(s.start)}</td>
+      <td class="num">${fmtDur(s.end - s.start)}</td>
+      <td class="num">${s.models}</td>
+      <td class="num">${fmtInt(s.model_calls)}</td>
+      <td class="num">${fmtInt(s.input_tokens)}</td>
+      <td class="num">${fmtInt(s.output_tokens)}</td>
+      <td class="num">${fmtInt(s.tool_calls)}</td>
+      <td class="num${s.errors ? " ev-error" : ""}">${fmtInt(s.errors)}</td>
+    </tr>`).join("") || `<tr><td colspan="9" class="empty">No sessions yet — run a multi-agent example.</td></tr>`;
+  document.querySelectorAll("#sessions tbody tr[data-id]").forEach((tr) =>
+    tr.addEventListener("click", () => { selected = tr.dataset.id; refresh(); }));
+}
+
+function renderModels(models) {
+  const max = Math.max(1, ...models.map((m) => m.input_tokens + m.output_tokens));
+  $("#models").innerHTML = models.map((m) => {
+    const total = m.input_tokens + m.output_tokens;
+    const label = m.agent_name || shortModel(m.model_name);
+    const sub = m.agent_name ? shortModel(m.model_name) : "";
+    return `<div class="bar-row">
+      <div class="bar-label" title="${esc(label)}">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ""}</div>
+      <div class="bar" style="width:${(total / max) * 100}%">
+        <div class="in" style="flex:${m.input_tokens}"></div><div class="out" style="flex:${m.output_tokens}"></div>
+      </div>
+      <div class="bar-val">${fmtInt(total)} · ${m.calls} calls</div>
+    </div>`;
+  }).join("") || `<div class="empty">No model responses recorded.</div>`;
+}
+
+function renderTools(tools) {
+  $("#tools tbody").innerHTML = tools.map((t) => `
+    <tr><td>${esc(t.tool_name)}</td><td class="num">${t.calls}</td>
+    <td class="num${t.errors ? " ev-error" : ""}">${t.errors}</td>
+    <td class="num">${fmtMs(t.avg_ms)}</td><td class="num">${fmtMs(t.max_ms)}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="empty">No tool calls recorded.</td></tr>`;
+}
+
+function who(e) {
+  return [e.agent_name, shortModel(e.model_name), e.tool_name].filter(Boolean).map(esc).join(" · ");
+}
+
+const EVENT_LABELS = {
+  session_start: "session start", session_end: "session end",
+  agent_start: "agent start", agent_end: "agent end",
+  model_response: "LLM response", model_error: "LLM error",
+  tool_start: "tool call", tool_end: "tool result", tool_error: "tool error",
+};
+
+const clip = (s, n = 90) => (s.length > n ? s.slice(0, n) + "…" : s);
+
+function detail(e) {
+  const d = e.data || {};
+  switch (e.event_type) {
+    case "model_response": {
+      // output shape (telemetry.py): a call that spends tokens but returns
+      // neither text nor tool calls is the "empty answer" symptom
+      let shape = "";
+      if (d.text_chars != null) {
+        shape = ` · ${fmtInt(d.text_chars)} chars text`;
+        if (d.reasoning_chars) shape += `, ${fmtInt(d.reasoning_chars)} reasoning`;
+        if (d.tool_calls) shape += `, ${d.tool_calls} tool call${d.tool_calls > 1 ? "s" : ""}`;
+      }
+      const empty = d.text_chars === 0 && !d.tool_calls && d.output_tokens > 0;
+      return `${esc(shortModel(e.model_name))} <span class="muted">· ${fmtInt(d.input_tokens)} → ${fmtInt(d.output_tokens)} tokens${shape}</span>` +
+        (empty ? ` <span class="ev-error">⚠ no text</span>` : "");
+    }
+    case "tool_start":
+      return `${esc(e.tool_name)}${d.tool_args ? ` <span class="muted">${esc(clip(String(d.tool_args)))}</span>` : ""}`;
+    case "tool_end":
+      return `${esc(e.tool_name)}${d.duration_ms != null ? ` <span class="muted">· ${fmtMs(d.duration_ms)}</span>` : ""}`;
+    case "tool_error":
+    case "model_error":
+      return `${esc(e.tool_name || shortModel(e.model_name))} <span class="ev-error">${esc(clip(d.error_message || d.error_type_name || ""))}</span>`;
+    default:
+      return esc(e.tool_name || shortModel(e.model_name));
+  }
+}
+
+let lastTimeline = [];
+const hiddenTypes = new Set(); // event types switched off in the filter
+
+const eventLabel = (type) => EVENT_LABELS[type] || type;
+
+function renderTypeFilter(events) {
+  const counts = new Map();
+  for (const e of events) counts.set(e.event_type, (counts.get(e.event_type) || 0) + 1);
+  $("#type-filter").innerHTML = [...counts].map(([type, n]) => `
+    <button type="button" class="chip${hiddenTypes.has(type) ? " off" : ""}" data-type="${esc(type)}"
+      aria-pressed="${!hiddenTypes.has(type)}">${esc(eventLabel(type))}<span class="n">${n}</span></button>`).join("");
+  document.querySelectorAll("#type-filter .chip").forEach((chip) =>
+    chip.addEventListener("click", () => {
+      const type = chip.dataset.type;
+      hiddenTypes.has(type) ? hiddenTypes.delete(type) : hiddenTypes.add(type);
+      renderTimeline();
+    }));
+}
+
+function renderTimeline(events = lastTimeline) {
+  lastTimeline = events;
+  const t0 = events.length ? events[0].timestamp : 0;
+  const visible = $("#show-all").checked ? events : events.filter((e) => !e.noise);
+  renderTypeFilter(visible);
+  const shown = visible.filter((e) => !hiddenTypes.has(e.event_type));
+  const box = $("#timeline");
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+  box.querySelector("tbody").innerHTML = shown.map((e) => `
+    <tr><td class="muted">+${fmtDur(e.timestamp - t0)}</td>
+    <td class="agent">${esc(e.agent_name || "–")}</td>
+    <td class="${e.event_type.includes("error") ? "ev-error" : ""}">${esc(eventLabel(e.event_type))}</td>
+    <td class="detail">${detail(e)}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="empty">No events.</td></tr>`;
+  if (atBottom) box.scrollTop = box.scrollHeight; // follow live events
+}
+
+$("#show-all").addEventListener("change", () => renderTimeline());
+
+function renderErrors(errors) {
+  $("#errors").innerHTML = errors.map((e) => `
+    <p><span class="ev-error">${esc(e.event_type)}</span> <span class="muted">${fmtTime(e.timestamp)}</span><br>
+    ${who(e)}<br><span class="muted">${esc(e.data.error_type_name || "")} ${esc(e.data.error_message || e.data.error || "")}</span></p>`).join("")
+    || `<div class="empty">No errors in this session.</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Agent swimlane: one lane per agent, time on the x axis.
+// LLM call = from the agent's previous event to its model_response;
+// tool call = tool_start -> tool_end; delegations (task / analyst_* tools) are
+// drawn as connectors to the analyst lanes instead of segments.
+// ---------------------------------------------------------------------------
+const SVG_NS = "http://www.w3.org/2000/svg";
+const LANE_H = 38, BAR_H = 14, TRACK_H = 24, LABEL_W = 190, AXIS_H = 24, PAD_R = 12;
+let swimlaneKey = "", swimlaneArgs = null;
+
+function svgEl(tag, attrs = {}, parent) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+function buildLanes(events, live) {
+  const named = events.filter((e) => e.agent_name);
+  if (!named.length) return null;
+  const t0 = events[0].timestamp;
+  const lanes = new Map();
+  const lane = (name) => {
+    if (!lanes.has(name)) lanes.set(name, { name, model: null, active: [], segs: [], errors: [],
+      openActive: null, last: null, openTools: new Map(), first: null });
+    return lanes.get(name);
+  };
+  for (const e of named) {
+    const L = lane(e.agent_name), t = e.timestamp - t0;
+    L.first ??= t;
+    switch (e.event_type) {
+      case "session_start": case "agent_start":
+        L.openActive ??= t; break;
+      case "session_end": case "agent_end":
+        if (L.openActive != null) { L.active.push([L.openActive, t]); L.openActive = null; } break;
+      case "model_response":
+        L.model ??= e.model_name;
+        L.segs.push({ kind: "llm", from: L.last ?? L.openActive ?? t, to: t, e }); break;
+      case "model_error":
+        L.segs.push({ kind: "llm", from: L.last ?? t, to: t, e, error: true });
+        L.errors.push({ t, e }); break;
+      case "tool_start":
+        if (!L.openTools.has(e.tool_name)) L.openTools.set(e.tool_name, []);
+        L.openTools.get(e.tool_name).push({ t, e }); break;
+      case "tool_end": case "tool_error": {
+        const start = (L.openTools.get(e.tool_name) || []).pop();
+        L.segs.push({ kind: "tool", from: start ? start.t : t, to: t, e, start: start?.e, error: e.event_type === "tool_error" });
+        if (e.event_type === "tool_error") L.errors.push({ t, e });
+        break;
+      }
+      default: continue;
+    }
+    if (!["session_start", "agent_start"].includes(e.event_type)) L.last = t;
+  }
+  // a session still being written extends to "now": a silent LLM call shows up as it grows
+  let tEnd = events[events.length - 1].timestamp - t0;
+  if (live) tEnd = Math.max(tEnd, Date.now() / 1000 - t0);
+  for (const L of lanes.values()) {
+    for (const [tool, starts] of L.openTools)
+      for (const st of starts) L.segs.push({ kind: "tool", from: st.t, to: tEnd, e: st.e, start: st.e, running: true });
+    if (L.openActive != null) {
+      const busy = [...L.openTools.values()].some((a) => a.length);
+      if (live && !busy) L.segs.push({ kind: "llm", from: L.last ?? L.openActive, to: tEnd, running: true });
+      L.active.push([L.openActive, tEnd]);
+    }
+  }
+  // delegations: "task" (deepagents) or a tool named after another agent (ADK)
+  const names = new Set(lanes.keys());
+  const isDelegation = (seg) => seg.kind === "tool" && (seg.e.tool_name === "task" || names.has(seg.e.tool_name));
+  let master = null;
+  for (const L of lanes.values()) {
+    const delegations = L.segs.filter(isDelegation);
+    L.segs = L.segs.filter((s) => !isDelegation(s));
+    if (delegations.length && !master) master = L;
+  }
+  const ordered = [...lanes.values()].sort((a, b) => (a === master ? -1 : b === master ? 1 : a.first - b.first));
+  return { lanes: ordered, master, tEnd: Math.max(tEnd, 1) };
+}
+
+function niceStep(span, target = 7) {
+  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200];
+  return steps.find((s) => span / s <= target) || 7200;
+}
+const fmtTick = (s) => (s < 60 ? `${s}s` : s % 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s / 60}m`);
+const clipText = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+function segTooltip(seg, laneName) {
+  const dur = fmtDur(seg.to - seg.from) + (seg.running ? " · running…" : "");
+  const d = seg.e?.data || {};
+  if (seg.kind === "llm") {
+    const lines = [laneName, shortModel(seg.e?.model_name) || "LLM call"];
+    if (d.input_tokens != null) lines.push(`${fmtInt(d.input_tokens)} → ${fmtInt(d.output_tokens)} tokens`);
+    if (seg.error) lines.push(d.error_message || "LLM error");
+    return { value: dur, key: "var(--viz-llm)", lines };
+  }
+  const args = seg.start?.data?.tool_args;
+  const lines = [laneName, seg.e.tool_name];
+  if (args) lines.push(clipText(String(args), 120));
+  if (seg.error) lines.push(d.error_message || "tool error");
+  return { value: dur, key: "var(--viz-tool)", lines };
+}
+
+function showTip(box, tip, info, evt) {
+  tip.replaceChildren();
+  const v = document.createElement("div"); v.className = "v"; v.textContent = info.value;
+  tip.appendChild(v);
+  info.lines.forEach((text, i) => {
+    const row = document.createElement("div"); row.className = "l";
+    if (i === 0) { const k = document.createElement("span"); k.className = "k"; k.style.background = info.key; row.appendChild(k); }
+    row.appendChild(document.createTextNode(text));
+    tip.appendChild(row);
+  });
+  tip.hidden = false;
+  const r = box.getBoundingClientRect();
+  const px = evt.clientX ?? (evt.target.getBoundingClientRect().left + 4);
+  const py = evt.clientY ?? evt.target.getBoundingClientRect().top;
+  const x = Math.min(px - r.left + 12, r.width - tip.offsetWidth - 4);
+  tip.style.left = `${Math.max(0, x)}px`;
+  tip.style.top = `${py - r.top + 14}px`;
+}
+
+function renderSwimlane(events, session, isLatest, force = false) {
+  const live = isLatest && session && Date.now() / 1000 - session.end < 3600 &&
+    !events.some((e) => e.event_type === "session_end" && !e.agent_name);
+  const key = `${session?.session_id}|${events.length}|${live ? Math.floor(Date.now() / 5000) : ""}|${$("#swimlane").clientWidth}`;
+  swimlaneArgs = [events, session, isLatest];
+  if (key === swimlaneKey && !force) return; // nothing new: keep the DOM (and any open tooltip)
+  swimlaneKey = key;
+
+  const box = $("#swimlane");
+  box.replaceChildren();
+  const data = events.length ? buildLanes(events, live) : null;
+  if (!data) {
+    const p = document.createElement("div"); p.className = "empty";
+    p.textContent = "No per-agent data for this session (recorded before telemetry.py).";
+    box.appendChild(p);
+    return;
+  }
+  const W = Math.max(box.clientWidth, 480), plotW = W - LABEL_W - PAD_R;
+  const H = AXIS_H + data.lanes.length * LANE_H;
+  const x = (t) => LABEL_W + (t / data.tEnd) * plotW;
+  const laneY = (i) => AXIS_H + i * LANE_H + LANE_H / 2;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
+    "aria-label": `Agent swimlane: ${data.lanes.length} agents over ${fmtDur(data.tEnd)}` }, box);
+  const tip = document.createElement("div"); tip.className = "viz-tip"; tip.hidden = true; box.appendChild(tip);
+
+  // axis + hairline grid
+  const step = niceStep(data.tEnd);
+  for (let t = 0; t <= data.tEnd + 1e-6; t += step) {
+    svgEl("line", { x1: x(t), x2: x(t), y1: AXIS_H - 4, y2: H, stroke: "var(--viz-grid)", "stroke-width": 1 }, svg);
+    const label = svgEl("text", { x: x(t), y: AXIS_H - 9, "text-anchor": t === 0 ? "start" : "middle",
+      "font-size": 11, fill: "var(--muted)", style: "font-variant-numeric: tabular-nums" }, svg);
+    label.textContent = fmtTick(t);
+  }
+
+  data.lanes.forEach((L, i) => {
+    const cy = laneY(i);
+    const name = svgEl("text", { x: 0, y: cy - 2, "font-size": 12, "font-weight": 500, fill: "var(--text)" }, svg);
+    name.textContent = clipText(L.name, 28);
+    svgEl("title", {}, name).textContent = L.name;
+    const model = svgEl("text", { x: 0, y: cy + 12, "font-size": 11, fill: "var(--muted)" }, svg);
+    model.textContent = clipText(shortModel(L.model) || "", 30);
+    for (const [a, b] of L.active)
+      svgEl("rect", { x: x(a), y: cy - TRACK_H / 2, width: Math.max(x(b) - x(a), 2), height: TRACK_H, rx: 4, fill: "var(--viz-track)" }, svg);
+  });
+
+  // delegation connectors: master lane -> analyst lane at start, back at end
+  if (data.master) {
+    const mi = data.lanes.indexOf(data.master);
+    data.lanes.forEach((L, i) => {
+      if (L === data.master) return;
+      for (const [a, b] of L.active) {
+        for (const [t, from, to] of [[a, mi, i], [b, i, mi]]) {
+          if (t >= data.tEnd - 1e-6 && from === i) continue; // still running: no report back yet
+          const y1 = laneY(from) + (to > from ? TRACK_H / 2 : -TRACK_H / 2);
+          const y2 = laneY(to) + (to > from ? -TRACK_H / 2 : TRACK_H / 2);
+          svgEl("line", { x1: x(t), x2: x(t), y1, y2, stroke: "var(--muted)", "stroke-width": 1, opacity: 0.7 }, svg);
+          svgEl("path", { d: `M${x(t) - 3.5},${y2 + (to > from ? -5 : 5)} L${x(t)},${y2} L${x(t) + 3.5},${y2 + (to > from ? -5 : 5)}`,
+            fill: "none", stroke: "var(--muted)", "stroke-width": 1, opacity: 0.7 }, svg);
+        }
+      }
+    });
+  }
+
+  // segments, each with a hit area wider than the mark (short calls are a few px)
+  data.lanes.forEach((L, i) => {
+    const cy = laneY(i);
+    for (const seg of [...L.segs].sort((a, b) => (a.kind === "llm") - (b.kind === "llm"))) {
+      const x1 = x(seg.from), w = x(seg.to) - x1;
+      const markW = Math.max(w - 2, 2); // 1px surface gap on each side
+      const hitW = Math.max(w, 10);
+      const hit = svgEl("rect", { class: "hit", x: x1 + w / 2 - hitW / 2, y: cy - LANE_H / 2, width: hitW, height: LANE_H, tabindex: 0 }, svg);
+      svgEl("rect", { class: "mark", x: x1 + (w - markW) / 2, y: cy - BAR_H / 2, width: markW, height: BAR_H,
+        rx: Math.min(3, markW / 2), fill: seg.kind === "llm" ? "var(--viz-llm)" : "var(--viz-tool)",
+        opacity: seg.running ? 0.55 : 1, "pointer-events": "none" }, svg);
+      const info = segTooltip(seg, L.name);
+      hit.setAttribute("aria-label", `${info.lines.join(", ")}: ${info.value}`);
+      const show = (evt) => showTip(box, tip, info, evt);
+      hit.addEventListener("pointermove", show);
+      hit.addEventListener("focus", show);
+      hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+      hit.addEventListener("blur", () => { tip.hidden = true; });
+    }
+    for (const err of L.errors) {
+      const g = svgEl("g", { "pointer-events": "none" }, svg);
+      svgEl("circle", { cx: x(err.t), cy: cy - BAR_H / 2 - 2, r: 6, fill: "var(--viz-critical)", stroke: "var(--panel)", "stroke-width": 2 }, g);
+      const glyph = svgEl("text", { x: x(err.t), y: cy - BAR_H / 2 + 1, "text-anchor": "middle", "font-size": 8, fill: "#fff" }, g);
+      glyph.textContent = "✕";
+    }
+  });
+}
+
+window.addEventListener("resize", () => { if (swimlaneArgs) renderSwimlane(...swimlaneArgs); });
+
+async function refresh() {
+  try {
+    const list = await getJSON("/api/sessions");
+    if (!selected || !list.some((s) => s.session_id === selected)) selected = list[0]?.session_id ?? null;
+    renderSessions(list);
+    const current = list.find((s) => s.session_id === selected);
+    renderKpis(current);
+    if (current) {
+      const d = await getJSON(`/api/session?id=${encodeURIComponent(selected)}`);
+      renderSwimlane(d.timeline, current, list[0] === current);
+      renderModels(d.models); renderTools(d.tools); renderTimeline(d.timeline); renderErrors(d.errors);
+    }
+    $("#status").textContent = `updated ${new Date().toLocaleTimeString()} · auto-refresh ${REFRESH_MS / 1000}s`;
+  } catch (err) {
+    $("#status").textContent = `error: ${err.message}`;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
