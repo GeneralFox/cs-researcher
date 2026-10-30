@@ -1,0 +1,24 @@
+[project]
+name = "crew-ai-experiment"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "irongian", email = "me@gllabs.eu" }
+]
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "crewai[litellm]>=1.15.33",
+    "ddgs>=9.16.1",
+    "httpx>=0.28.1",
+    "observra>=1.1",
+    "pypdf>=6.21.4",
+]
+
+[project.scripts]
+crew-ai-experiment = "crew_ai_experiment:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
