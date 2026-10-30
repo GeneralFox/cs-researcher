@@ -1,1 +1,1 @@
-"""CrewAI port of ai-experiment's multi-agent cybersecurity deep search."""
+"""CrewAI example of multi-agent cybersecurity deep search."""
