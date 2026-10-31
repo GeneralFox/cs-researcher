@@ -1,7 +1,7 @@
 [project]
-name = "crew-ai-experiment"
+name = "cs-researcher"
 version = "0.1.0"
-description = "CrewAI port of the multi-agent cybersecurity deep search: a master model orchestrating three analysts on local Ollama models"
+description = "Multi-agent cybersecurity research: a coordinator model delegating to analysts on local Ollama models, restricted to trusted sources"
 readme = "README.md"
 authors = [
     { name = "irongian", email = "me@gllabs.eu" }
@@ -14,12 +14,12 @@ dependencies = [
     "ddgs>=9.16.1",
     "httpx>=0.28.1",
     "observra>=1.1",
+    "pydantic>=2.12",
     "pypdf>=6.21.4",
 ]
 
 [project.scripts]
-deep-cyber-researcher = "crew_ai_experiment.deep_search_multi_crewai:main"
-deep-cyber-dashboard = "crew_ai_experiment.dashboard:main"
+cs-researcher = "cs_researcher.cli:main"
 
 [dependency-groups]
 dev = [
@@ -37,11 +37,5 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 120
 
-[tool.ruff.format]
-# verbatim copy of ai-experiment's dashboard: keep it diffable against the original
-exclude = ["src/crew_ai_experiment/dashboard.py"]
-
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-# the env vars that turn CrewAI's telemetry off must be set before importing it
-per-file-ignores = { "src/crew_ai_experiment/deep_search_multi_crewai.py" = ["E402"] }

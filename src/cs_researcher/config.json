@@ -1,0 +1,45 @@
+{
+  "ollama": {
+    "base_url": "http://localhost:11434"
+  },
+  "llm_defaults": {
+    "num_ctx": 16384,
+    "temperature": 0.1,
+    "max_tokens": 3000,
+    "timeout": 420,
+    "num_retries": 2,
+    "think": false
+  },
+  "coordinator": {
+    "name": "research_coordinator",
+    "model": "gemma4:12b-mlx",
+    "num_retries": 0
+  },
+  "analysts": [
+    { "model": "nemotron-3.5-bolt:e4b" },
+    { "model": "bonsai-2:4b" },
+    { "model": "qwen3.5:4b-mlx" }
+  ],
+  "research": {
+    "max_analyst_calls": 12,
+    "search_results": 10,
+    "max_page_chars": 8000,
+    "fetch_timeout": 20,
+    "trusted_sites": [
+      "nist.gov",
+      "cisa.gov",
+      "attack.mitre.org",
+      "isc.sans.edu",
+      "bleepingcomputer.com",
+      "thehackernews.com"
+    ]
+  },
+  "telemetry": {
+    "enabled": true,
+    "db_path": "telemetry.db"
+  },
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8765
+  }
+}

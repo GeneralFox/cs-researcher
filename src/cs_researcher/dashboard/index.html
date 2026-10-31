@@ -3,12 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Telemetry</title>
+<title>cs-researcher Telemetry</title>
 <style>
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #677085;
     --border: #e2e5eb; --accent: #3b6fe0; --accent2: #12a38a; --err: #d04a3c;
-    --adk: #e8f0fe; --adk-text: #1a56c9; --lg: #e6f6f2; --lg-text: #0d7d69;
     --row-hover: #f0f3f8; --row-sel: #e3ebfb;
     /* swimlane: categorical slots 1-2 + status critical (dataviz palette) */
     --viz-llm: #2a78d6; --viz-tool: #eb6834; --viz-critical: #d03b3b;
@@ -19,7 +18,6 @@
     :root {
       --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #8f98ab;
       --border: #2b313c; --accent: #6d9bff; --accent2: #3cc9ad; --err: #f07a6c;
-      --adk: #1e2c47; --adk-text: #9dbcff; --lg: #173832; --lg-text: #6fe0c7;
       --row-hover: #222833; --row-sel: #24324d;
       --viz-llm: #3987e5; --viz-tool: #d95926;
       --viz-track: #232833; --viz-grid: #2b313c;
@@ -50,9 +48,7 @@
   #sessions tbody tr { cursor: pointer; }
   #sessions tbody tr:hover { background: var(--row-hover); }
   #sessions tbody tr.sel { background: var(--row-sel); }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
-  .badge.adk { background: var(--adk); color: var(--adk-text); }
-  .badge.langgraph { background: var(--lg); color: var(--lg-text); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--row-sel); color: var(--accent); }
   .bar-row { display: grid; grid-template-columns: minmax(120px, 34%) 1fr auto; gap: 10px; align-items: center; margin: 8px 0; }
   .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar-label small { color: var(--muted); display: block; font-size: 11px; }
@@ -96,7 +92,7 @@
 <body>
 <main>
   <header>
-    <h1>Agent Telemetry <span class="muted" style="font-weight:400">· observra / SQLite</span></h1>
+    <h1>cs-researcher <span class="muted" style="font-weight:400">· telemetry</span></h1>
     <span class="status" id="status">loading…</span>
   </header>
 
@@ -211,7 +207,7 @@ function renderSessions(list) {
       <td class="num">${fmtInt(s.output_tokens)}</td>
       <td class="num">${fmtInt(s.tool_calls)}</td>
       <td class="num${s.errors ? " ev-error" : ""}">${fmtInt(s.errors)}</td>
-    </tr>`).join("") || `<tr><td colspan="9" class="empty">No sessions yet — run a multi-agent example.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="9" class="empty">No sessions yet — run <code>cs-researcher ask</code>.</td></tr>`;
   document.querySelectorAll("#sessions tbody tr[data-id]").forEach((tr) =>
     tr.addEventListener("click", () => { selected = tr.dataset.id; refresh(); }));
 }
@@ -329,7 +325,7 @@ function renderErrors(errors) {
 // ---------------------------------------------------------------------------
 // Agent swimlane: one lane per agent, time on the x axis.
 // LLM call = from the agent's previous event to its model_response;
-// tool call = tool_start -> tool_end; delegations (task / analyst_* tools) are
+// tool call = tool_start -> tool_end; delegations (tools named after an agent) are
 // drawn as connectors to the analyst lanes instead of segments.
 // ---------------------------------------------------------------------------
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -392,9 +388,9 @@ function buildLanes(events, live) {
       L.active.push([L.openActive, tEnd]);
     }
   }
-  // delegations: "task" (deepagents) or a tool named after another agent (ADK)
+  // delegations: a tool named after another agent
   const names = new Set(lanes.keys());
-  const isDelegation = (seg) => seg.kind === "tool" && (seg.e.tool_name === "task" || names.has(seg.e.tool_name));
+  const isDelegation = (seg) => seg.kind === "tool" && names.has(seg.e.tool_name);
   let master = null;
   for (const L of lanes.values()) {
     const delegations = L.segs.filter(isDelegation);
